@@ -7,12 +7,21 @@ if ('serviceWorker' in navigator) {
     });
 }
 
+// LEVELS CONFIG
+const LEVELS = [
+    { name: "🌲 Forest Stream", grid: [3, 3], bg: "url('assets/img/background.png')", count: 9 },
+    { name: "🪵 Beaver Dam", grid: [4, 3], bg: "url('assets/img/background2.png')", count: 12 },
+    { name: "❄️ Winter Night", grid: [4, 4], bg: "url('assets/img/background3.png')", count: 16 }
+];
+
+let currentLevelIndex = 0;
+
 // CONFIG
-const CONFIG = { speed: 1200, minSpeed: 650, decrease: 10 }; // Fair Play
+const CONFIG = { baseSpeed: 1200, minSpeed: 600, decrease: 15 };
 let state = {
     score: 0, level: 1, lives: 3,
-    activeTimers: new Map(), // Tracks active beavers and their miss timers
-    busyCells: new Set(), // Tracks cells currently animating/busy
+    activeTimers: new Map(),
+    busyCells: new Set(),
     isOver: false, speed: 1000, combo: 0, maxCombo: 0, isPaused: false
 };
 
@@ -24,8 +33,10 @@ let records = {
 
 // DOM
 const els = {
-    cells: document.querySelectorAll('.cell'),
+    gameContainer: document.getElementById('game-container'),
     intro: document.getElementById('intro-screen'),
+    levelSelector: document.getElementById('level-selector'),
+    levelsContainer: document.querySelector('.levels-container'),
     gameOver: document.getElementById('game-over'),
     pauseScreen: document.getElementById('pause-screen'),
     score: document.getElementById('score'),
@@ -60,7 +71,6 @@ function saveRecords() {
 // AUDIO SYSTEM (Music + SFX)
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-// Simple SFX
 function beep(f, t, vol = 0.1, dur = 0.1) {
     const o = ctx.createOscillator(); const g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
@@ -70,13 +80,12 @@ function beep(f, t, vol = 0.1, dur = 0.1) {
     o.start(); o.stop(ctx.currentTime + dur);
 }
 
-// BACKGROUND MUSIC ENGINE (NEW)
+// MUSIC ENGINE
 const Music = {
     isPlaying: false,
     tempo: 1.0,
     nextNoteTime: 0,
     noteIndex: 0,
-    // Funky Loop: C - E - G - A - A# - A - G - E
     melody: [523.25, 0, 659.25, 0, 783.99, 0, 880.00, 0, 932.33, 0, 880.00, 0, 783.99, 0, 659.25, 0],
     bass: [261.63, 261.63, 329.63, 329.63, 392.00, 392.00, 440.00, 440.00, 466.16, 466.16, 440.00, 440.00, 392.00, 392.00, 329.63, 329.63],
     timerID: null,
@@ -101,7 +110,7 @@ const Music = {
         if (!this.isPlaying) return;
         while (this.nextNoteTime < ctx.currentTime + 0.1) {
             this.playStep(this.nextNoteTime);
-            const secondsPerStep = 0.125 / this.tempo; // 16th notes
+            const secondsPerStep = 0.125 / this.tempo;
             this.nextNoteTime += secondsPerStep;
         }
         this.timerID = setTimeout(() => this.scheduler(), 25);
@@ -109,37 +118,32 @@ const Music = {
 
     playStep(time) {
         const step = this.noteIndex % 16;
-
-        // LEAD (Square - Retro Vibe)
         if (this.melody[step] > 0) {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.connect(gain); gain.connect(ctx.destination);
             osc.type = 'square';
             osc.frequency.value = this.melody[step];
-            gain.gain.setValueAtTime(0.02, time); // Low volume lead
+            gain.gain.setValueAtTime(0.02, time);
             gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
             osc.start(time); osc.stop(time + 0.1);
         }
-
-        // BASS (Triangle - Groovy)
         if (this.bass[step] > 0) {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
             osc.connect(gain); gain.connect(ctx.destination);
             osc.type = 'triangle';
             osc.frequency.value = this.bass[step] / 2;
-            gain.gain.setValueAtTime(0.05, time); // Louder Bass
+            gain.gain.setValueAtTime(0.05, time);
             gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
             osc.start(time); osc.stop(time + 0.2);
         }
-
         this.noteIndex++;
     }
 };
 
 function playSadMusic() {
-    Music.stop(); // Stop happy music
+    Music.stop();
     const notes = [
         { f: 392.00, d: 0.5 }, { f: 311.13, d: 0.5 }, { f: 261.63, d: 0.5 },
         { f: 196.00, d: 1.0 }, { f: 155.56, d: 1.5 }
@@ -169,51 +173,123 @@ function togglePause() {
         Music.start();
         state.activeTimers.clear();
         state.busyCells.clear();
-        els.cells.forEach(c => c.innerHTML = '');
+        document.querySelectorAll('.cell').forEach(c => c.innerHTML = '');
         spawn();
     }
 }
 
-// GAME LOOP
-function startGame() {
+// LEVEL SYSTEM
+function showLevelSelector() {
     if (ctx.state === 'suspended') ctx.resume();
     els.intro.classList.add('fade-out');
+    els.levelSelector.style.display = 'flex';
+    renderLevelSelector();
+}
+
+function backToIntro() {
+    els.levelSelector.style.display = 'none';
+    els.intro.classList.remove('fade-out');
+}
+
+function renderLevelSelector() {
+    els.levelsContainer.innerHTML = '';
+    LEVELS.forEach((lvl, idx) => {
+        const card = document.createElement('div');
+        card.className = 'level-card';
+        card.innerHTML = `<h3>Level ${idx + 1}</h3><p>${lvl.name}</p><p>${lvl.grid[0]}x${lvl.grid[1]} Grid</p>`;
+        card.onclick = () => startLevel(idx);
+        els.levelsContainer.appendChild(card);
+    });
+}
+
+function startLevel(idx) {
+    currentLevelIndex = idx;
+    els.levelSelector.style.display = 'none';
+    initGrid(LEVELS[idx]);
     resetGame();
 }
 
+function initGrid(config) {
+    const frame = document.getElementById('app-frame');
+
+    // Set Background
+    // If exact asset doesn't exist, it will fallback or just show color. 
+    // We assume assets will be there or we use default for now if 404.
+    frame.style.backgroundImage = `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), ${config.bg}`;
+
+    // Reset Container
+    els.gameContainer.innerHTML = '';
+
+    // Set Grid Class
+    els.gameContainer.className = ''; // clear previous
+    if (config.grid[0] === 3) els.gameContainer.className = 'grid-3x3';
+    if (config.grid[0] === 4 && config.grid[1] === 3) els.gameContainer.className = 'grid-4x3';
+    if (config.grid[0] === 4 && config.grid[1] === 4) els.gameContainer.className = 'grid-4x4';
+
+    // Create Cells
+    for (let i = 0; i < config.count; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.onclick = () => hit(i);
+        els.gameContainer.appendChild(cell);
+
+        // Add combo container only once, efficiently? 
+        // Actually, existing code had combo-cnt inside game-container. 
+        // We should add it back after cells.
+    }
+
+    // Add shared combo container
+    if (!document.getElementById('combo-cnt')) {
+        const comboCnt = document.createElement('div');
+        comboCnt.id = 'combo-cnt';
+        comboCnt.className = 'combo-container';
+        els.gameContainer.appendChild(comboCnt);
+        els.comboCnt = comboCnt; // update Ref
+    }
+}
+
+// GAME LOOP
 function resetGame() {
     Music.start();
     Music.setTempo(1.0);
 
     if (state.activeTimers) state.activeTimers.forEach(t => clearTimeout(t));
 
+    const levelConfig = LEVELS[currentLevelIndex];
+
     state = {
         score: 0, level: 1, lives: 3,
         activeTimers: new Map(),
         busyCells: new Set(),
-        isOver: false, speed: 1000, combo: 0, maxCombo: 0, isPaused: false
+        isOver: false, speed: CONFIG.baseSpeed, combo: 0, maxCombo: 0, isPaused: false
     };
 
     updateUI();
     els.gameOver.classList.remove('show');
-    els.cells.forEach(c => c.innerHTML = '');
-    els.comboCnt.innerHTML = '';
+
+    // Clear cells via DOM
+    const cells = document.querySelectorAll('.cell');
+    cells.forEach(c => c.innerHTML = '');
+    if (els.comboCnt) els.comboCnt.innerHTML = '';
+
     setTimeout(spawn, 500);
 }
 
 function spawn() {
     if (state.isOver || state.isPaused) return;
 
-    // Delayed Multi-spawn: 1 beaver until lvl 10, then 2.
-    const maxBeavers = Math.floor((state.level - 1) / 10) + 1;
+    // Difficulty Scaling based on In-Game Level (not Stage)
+    // As score goes up, more simultaneous beavers.
+    const maxBeavers = Math.min(4, Math.floor((state.level - 1) / 5) + 1);
 
     if (state.activeTimers.size >= maxBeavers) {
         setTimeout(spawn, 500);
         return;
     }
 
+    const cells = document.querySelectorAll('.cell');
     let availableIdx = [];
-    els.cells.forEach((_, i) => {
+    cells.forEach((_, i) => {
         if (!state.activeTimers.has(i) && !state.busyCells.has(i)) {
             availableIdx.push(i);
         }
@@ -231,20 +307,19 @@ function spawn() {
     beaver.className = 'hole-mask';
     beaver.style.pointerEvents = "none";
     beaver.innerHTML = `<div class="beaver"><div class="beaver-container"><div class="beaver-img normal"></div></div></div>`;
-    els.cells[idx].appendChild(beaver);
+    cells[idx].appendChild(beaver);
 
     // Set Timer
     const timerId = setTimeout(() => miss(idx), state.speed);
     state.activeTimers.set(idx, timerId);
 
-    const nextSpawnTime = Math.max(400, state.speed / (maxBeavers * 0.8));
+    const nextSpawnTime = Math.max(300, state.speed / (maxBeavers * 0.9));
     setTimeout(spawn, nextSpawnTime);
 }
 
 function hit(idx) {
     if (state.isOver || state.isPaused) return;
 
-    // HANDLE EMPTY CLICK
     if (!state.activeTimers.has(idx)) {
         wrongHole();
         return;
@@ -252,9 +327,10 @@ function hit(idx) {
 
     clearTimeout(state.activeTimers.get(idx));
     state.activeTimers.delete(idx);
-    state.busyCells.add(idx); // Mark busy immediately
+    state.busyCells.add(idx);
 
-    const cell = els.cells[idx];
+    const cells = document.querySelectorAll('.cell');
+    const cell = cells[idx];
     const mask = cell.querySelector('.hole-mask');
     const img = mask ? mask.querySelector('.beaver-img') : null;
     if (img) img.className = 'beaver-img yes';
@@ -267,30 +343,29 @@ function hit(idx) {
     state.score += points;
     state.level = Math.floor(state.score / 100) + 1;
 
-    state.speed = Math.max(CONFIG.minSpeed, CONFIG.speed - (state.level * CONFIG.decrease));
-    Music.setTempo(1.0 + (state.level * 0.1));
+    // Speed increases per level
+    state.speed = Math.max(CONFIG.minSpeed, CONFIG.baseSpeed - (state.level * CONFIG.decrease));
+    Music.setTempo(1.0 + (state.level * 0.05));
 
     beep(600 + (state.combo * 50), 'square');
     updateUI();
 
     setTimeout(() => {
-        if (els.cells[idx]) els.cells[idx].innerHTML = '';
-        state.busyCells.delete(idx); // Release busy state
+        if (cells[idx]) cells[idx].innerHTML = '';
+        state.busyCells.delete(idx);
     }, 300);
 }
 
-/* NEW FUNCTION: Wrong Hole Click */
 function wrongHole() {
     state.lives--;
     state.combo = 0;
-    els.comboCnt.innerHTML = '';
+    if (els.comboCnt) els.comboCnt.innerHTML = '';
 
-    beep(150, 'sawtooth'); // Error sound
+    beep(150, 'sawtooth');
 
-    // Visual feedback (Shake container)
     const container = document.getElementById('game-container');
-    container.classList.remove('shake'); // Reset anim
-    void container.offsetWidth; // Trigger reflow
+    container.classList.remove('shake');
+    void container.offsetWidth;
     container.classList.add('shake');
 
     updateUI();
@@ -305,12 +380,13 @@ function miss(idx) {
 
     if (!state.activeTimers.has(idx)) return;
     state.activeTimers.delete(idx);
-    state.busyCells.add(idx); // Mark busy immediately
+    state.busyCells.add(idx);
 
     state.combo = 0;
-    els.comboCnt.innerHTML = '';
+    if (els.comboCnt) els.comboCnt.innerHTML = '';
 
-    const cell = els.cells[idx];
+    const cells = document.querySelectorAll('.cell');
+    const cell = cells[idx];
     const mask = cell.querySelector('.hole-mask');
     if (mask) {
         const beaver = mask.querySelector('.beaver');
@@ -327,15 +403,15 @@ function miss(idx) {
         endGame();
     } else {
         setTimeout(() => {
-            if (els.cells[idx]) els.cells[idx].innerHTML = '';
-            state.busyCells.delete(idx); // Release busy state
+            if (cells[idx]) cells[idx].innerHTML = '';
+            state.busyCells.delete(idx);
         }, 300);
     }
 }
 
 function showComboEffect(val) {
     if (val < 2) return;
-    els.comboCnt.innerHTML = `<div class="combo-pop">x${val}</div>`;
+    if (els.comboCnt) els.comboCnt.innerHTML = `<div class="combo-pop">x${val}</div>`;
 }
 
 function endGame() {

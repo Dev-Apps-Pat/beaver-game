@@ -35,7 +35,16 @@
                 </div>
             </div>
 
-            <button class="start-btn" onclick="startGame()">JOGAR</button>
+            <button class="start-btn" onclick="showLevelSelector()">JOGAR</button>
+        </div>
+
+        <!-- LEVEL SELECTOR -->
+        <div id="level-selector" style="display: none;">
+            <div class="selector-title">SELECT LEVEL</div>
+            <div class="levels-container">
+                <!-- Levels will be injected here -->
+            </div>
+            <button class="menu-btn quit" onclick="backToIntro()">VOLTAR</button>
         </div>
 
         <!-- PAUSE OVERLAY -->
@@ -100,6 +109,8 @@
             </div>
 
             <button class="restart-btn" onclick="resetGame()">Tentar Novamente</button>
+            <button class="menu-btn quit" onclick="showLevelSelector()"
+                style="margin-top: 15px; width: auto; padding: 10px 30px;">Menu</button>
         </div>
     </div>
 
