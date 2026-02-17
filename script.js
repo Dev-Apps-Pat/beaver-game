@@ -31,10 +31,11 @@ let records = {
     maxCombo: parseInt(localStorage.getItem('beaver_maxCombo') || 0)
 };
 
-// DOM
+// DOM (Updated with Loading Screen)
 const els = {
     gameContainer: document.getElementById('game-container'),
     intro: document.getElementById('intro-screen'),
+    loadingScreen: document.getElementById('loading-screen'),
     levelSelector: document.getElementById('level-selector'),
     levelsContainer: document.querySelector('.levels-container'),
     gameOver: document.getElementById('game-over'),
@@ -49,12 +50,58 @@ const els = {
     introMaxCombo: document.getElementById('intro-max-combo')
 };
 
-// INIT UI
-updateIntroStats();
+// ASSET PRELOADING
+const ASSETS_TO_LOAD = [
+    'assets/img/background.png',
+    'assets/img/background2.png',
+    'assets/img/background3.png',
+    'assets/img/beaver_main.png',
+    'assets/img/hole.png',
+    'assets/img/normal.png',
+    'assets/img/yes.png',
+    'assets/img/no.png',
+    'assets/img/over.png'
+];
+
+function preloadAssets() {
+    let loaded = 0;
+    const total = ASSETS_TO_LOAD.length;
+
+    return Promise.all(ASSETS_TO_LOAD.map(src => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.src = src;
+            img.onload = () => {
+                loaded++;
+                console.log(`Loaded: ${src} (${loaded}/${total})`);
+                resolve();
+            };
+            img.onerror = () => {
+                console.warn(`Failed to load: ${src}`);
+                resolve(); // Continue even on error
+            };
+        });
+    }));
+}
+
+// INIT UI & ASSETS
+// Start preloading immediately
+preloadAssets().then(() => {
+    // Hide Loading Screen
+    if (els.loadingScreen) {
+        els.loadingScreen.classList.add('fade-out');
+        setTimeout(() => {
+            els.loadingScreen.style.display = 'none';
+        }, 500);
+    }
+    // Show Intro Logic (which is default, but now visible underneath)
+    updateIntroStats();
+    if (els.intro) els.intro.style.display = 'flex'; // Ensure visible
+});
 
 function updateIntroStats() {
-    els.introHighScore.innerText = records.highScore;
-    els.introMaxCombo.innerText = records.maxCombo;
+    if (els.introHighScore) els.introHighScore.innerText = records.highScore;
+    if (els.introMaxCombo) els.introMaxCombo.innerText = records.maxCombo;
 }
 
 function saveRecords() {
