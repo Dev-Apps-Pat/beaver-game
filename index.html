@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <!-- PWA SUPPORT -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2e7d32">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <title>Beaver Smash</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+</head>
+
+<body>
+
+    <div id="app-frame">
+        <!-- INTRO SCREEN -->
+        <div id="intro-screen">
+            <img class="intro-bg" src="assets/img/beaver_main.png" alt="Beaver Main">
+            <div class="game-title">BEAVER<br>SMASH</div>
+
+            <div class="intro-stats">
+                <div class="intro-stat-item">
+                    <span class="label">HIGH SCORE</span>
+                    <span class="value" id="intro-high-score">0</span>
+                </div>
+                <div class="intro-stat-item">
+                    <span class="label">MAX COMBO</span>
+                    <span class="value" id="intro-max-combo">0</span>
+                </div>
+            </div>
+
+            <button class="start-btn" onclick="startGame()">JOGAR</button>
+        </div>
+
+        <!-- PAUSE OVERLAY -->
+        <div id="pause-screen">
+            <div class="pause-menu">
+                <div class="pause-title">PAUSADO</div>
+                <button class="menu-btn resume" onclick="togglePause()">CONTINUAR</button>
+                <button class="menu-btn quit" onclick="window.location.reload()">SAIR</button>
+            </div>
+        </div>
+
+        <!-- HEADER -->
+        <div id="header-container">
+            <div class="wood-btn" onclick="togglePause()">
+                ❚❚
+            </div>
+            <div class="wood-panel">
+                <div class="stat-group">
+                    <span class="wood-label">Placar</span>
+                    <span class="wood-value" id="score">0</span>
+                </div>
+                <div class="stat-group">
+                    <span class="wood-label">Combo</span>
+                    <span class="wood-value" id="combo-cnt-top" style="color:#ffd700">0</span>
+                </div>
+            </div>
+            <div class="stat-group" style="padding: 0 5px;">
+                <span class="wood-label">Nível</span>
+                <span class="wood-value" id="level">1</span>
+            </div>
+            <div class="stat-group">
+                <span class="wood-label">Vidas</span>
+                <span class="wood-value" id="lives" style="font-size: 18px; letter-spacing: 1px;">❤❤❤</span>
+            </div>
+        </div>
+
+        <!-- GRID -->
+        <div id="game-container">
+            <!-- 9 Cells -->
+            <div class="cell" onclick="hit(0)"></div>
+            <div class="cell" onclick="hit(1)"></div>
+            <div class="cell" onclick="hit(2)"></div>
+            <div class="cell" onclick="hit(3)"></div>
+            <div class="cell" onclick="hit(4)"></div>
+            <div class="cell" onclick="hit(5)"></div>
+            <div class="cell" onclick="hit(6)"></div>
+            <div class="cell" onclick="hit(7)"></div>
+            <div class="cell" onclick="hit(8)"></div>
+
+            <!-- COMBO OVERLAY -->
+            <div id="combo-cnt" class="combo-container"></div>
+        </div>
+
+        <!-- GAME OVER -->
+        <div id="game-over">
+            <div class="game-over-img"></div>
+            <div class="game-over-text">GAME OVER</div>
+
+            <div class="game-over-stats">
+                <div>Pontos: <span id="final-score" style="color:#fff">0</span></div>
+                <div>Maior Combo: <span id="final-combo" style="color:#ffd700">0</span></div>
+            </div>
+
+            <button class="restart-btn" onclick="resetGame()">Tentar Novamente</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
