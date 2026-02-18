@@ -1,4 +1,4 @@
-const CACHE_NAME = 'beaver-game-v1';
+const CACHE_NAME = 'racoon-game-v1';
 const ASSETS = [
     './',
     './index.html',

@@ -10,7 +10,7 @@ if ('serviceWorker' in navigator) {
 // LEVELS CONFIG
 const LEVELS = [
     { name: "🌲 Forest Stream", grid: [3, 3], bg: "url('assets/img/background.png')", count: 9 },
-    { name: "🪵 Beaver Dam", grid: [4, 3], bg: "url('assets/img/background2.png')", count: 12 },
+    { name: "🪵 Racoon Den", grid: [4, 3], bg: "url('assets/img/background2.png')", count: 12 },
     { name: "❄️ Winter Night", grid: [4, 4], bg: "url('assets/img/background3.png')", count: 16 }
 ];
 
@@ -27,8 +27,8 @@ let state = {
 
 // PERSISTENCE
 let records = {
-    highScore: parseInt(localStorage.getItem('beaver_highScore') || 0),
-    maxCombo: parseInt(localStorage.getItem('beaver_maxCombo') || 0)
+    highScore: parseInt(localStorage.getItem('racoon_highScore') || 0),
+    maxCombo: parseInt(localStorage.getItem('racoon_maxCombo') || 0)
 };
 
 // DOM (Updated with Loading Screen)
@@ -85,8 +85,11 @@ function preloadAssets() {
 }
 
 // INIT UI & ASSETS
-// Start preloading immediately
-preloadAssets().then(() => {
+// Combine preload with a timeout race to prevent infinite loading
+Promise.race([
+    preloadAssets(),
+    new Promise(resolve => setTimeout(resolve, 3000)) // Force start after 3s
+]).then(() => {
     // Hide Loading Screen
     if (els.loadingScreen) {
         els.loadingScreen.classList.add('fade-out');
@@ -94,9 +97,9 @@ preloadAssets().then(() => {
             els.loadingScreen.style.display = 'none';
         }, 500);
     }
-    // Show Intro Logic (which is default, but now visible underneath)
+    // Show Intro Logic
     updateIntroStats();
-    if (els.intro) els.intro.style.display = 'flex'; // Ensure visible
+    if (els.intro) els.intro.style.display = 'flex';
 });
 
 function updateIntroStats() {
@@ -107,11 +110,11 @@ function updateIntroStats() {
 function saveRecords() {
     if (state.score > records.highScore) {
         records.highScore = state.score;
-        localStorage.setItem('beaver_highScore', records.highScore);
+        localStorage.setItem('racoon_highScore', records.highScore);
     }
     if (state.maxCombo > records.maxCombo) {
         records.maxCombo = state.maxCombo;
-        localStorage.setItem('beaver_maxCombo', records.maxCombo);
+        localStorage.setItem('racoon_maxCombo', records.maxCombo);
     }
 }
 
@@ -326,10 +329,10 @@ function spawn() {
     if (state.isOver || state.isPaused) return;
 
     // Difficulty Scaling based on In-Game Level (not Stage)
-    // As score goes up, more simultaneous beavers.
-    const maxBeavers = Math.min(4, Math.floor((state.level - 1) / 5) + 1);
+    // As score goes up, more simultaneous racoons.
+    const maxRacoons = Math.min(4, Math.floor((state.level - 1) / 5) + 1);
 
-    if (state.activeTimers.size >= maxBeavers) {
+    if (state.activeTimers.size >= maxRacoons) {
         setTimeout(spawn, 500);
         return;
     }
@@ -349,18 +352,18 @@ function spawn() {
 
     const idx = availableIdx[Math.floor(Math.random() * availableIdx.length)];
 
-    // Create Beaver
-    const beaver = document.createElement('div');
-    beaver.className = 'hole-mask';
-    beaver.style.pointerEvents = "none";
-    beaver.innerHTML = `<div class="beaver"><div class="beaver-container"><div class="beaver-img normal"></div></div></div>`;
-    cells[idx].appendChild(beaver);
+    // Create Racoon
+    const racoon = document.createElement('div');
+    racoon.className = 'hole-mask';
+    racoon.style.pointerEvents = "none";
+    racoon.innerHTML = `<div class="racoon"><div class="racoon-container"><div class="racoon-img normal"></div></div></div>`;
+    cells[idx].appendChild(racoon);
 
     // Set Timer
     const timerId = setTimeout(() => miss(idx), state.speed);
     state.activeTimers.set(idx, timerId);
 
-    const nextSpawnTime = Math.max(300, state.speed / (maxBeavers * 0.9));
+    const nextSpawnTime = Math.max(300, state.speed / (maxRacoons * 0.9));
     setTimeout(spawn, nextSpawnTime);
 }
 
@@ -379,8 +382,8 @@ function hit(idx) {
     const cells = document.querySelectorAll('.cell');
     const cell = cells[idx];
     const mask = cell.querySelector('.hole-mask');
-    const img = mask ? mask.querySelector('.beaver-img') : null;
-    if (img) img.className = 'beaver-img yes';
+    const img = mask ? mask.querySelector('.racoon-img') : null;
+    if (img) img.className = 'racoon-img yes';
 
     state.combo++;
     if (state.combo > state.maxCombo) state.maxCombo = state.combo;
@@ -436,10 +439,10 @@ function miss(idx) {
     const cell = cells[idx];
     const mask = cell.querySelector('.hole-mask');
     if (mask) {
-        const beaver = mask.querySelector('.beaver');
-        if (beaver) beaver.classList.add('miss');
-        const img = mask.querySelector('.beaver-img');
-        if (img) img.className = 'beaver-img no';
+        const racoon = mask.querySelector('.racoon');
+        if (racoon) racoon.classList.add('miss');
+        const img = mask.querySelector('.racoon-img');
+        if (img) img.className = 'racoon-img no';
     }
 
     state.lives--;
