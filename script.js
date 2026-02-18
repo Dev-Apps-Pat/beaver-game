@@ -1,9 +1,42 @@
 // PWA SERVICE WORKER REGISTRATION
+// PWA SERVICE WORKER REGISTRATION
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js')
-            .then(reg => console.log('SW registered!', reg))
+            .then(reg => {
+                console.log('SW registered!', reg);
+
+                // If there's a waiting worker, we can skip waiting (this is handled in sw.js now)
+                if (reg.waiting) {
+                    console.log('SW waiting, skipping...');
+                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                }
+
+                reg.onupdatefound = () => {
+                    const installingWorker = reg.installing;
+                    installingWorker.onstatechange = () => {
+                        if (installingWorker.state === 'installed') {
+                            if (navigator.serviceWorker.controller) {
+                                // New update available
+                                console.log('New content available; please refresh.');
+                                // Ideally show a toast, for now just log.
+                                // sw.js handles skipWaiting, so it might auto-activate.
+                            } else {
+                                console.log('Content is cached for offline use.');
+                            }
+                        }
+                    };
+                };
+            })
             .catch(err => console.log('SW failed!', err));
+
+        // Reload page when new SW takes control
+        let refreshing;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
+        });
     });
 }
 
@@ -328,9 +361,14 @@ function resetGame() {
 function spawn() {
     if (state.isOver || state.isPaused) return;
 
-    // Difficulty Scaling based on In-Game Level (not Stage)
-    // As score goes up, more simultaneous racoons.
-    const maxRacoons = Math.min(4, Math.floor((state.level - 1) / 5) + 1);
+    const levelConfig = LEVELS[currentLevelIndex];
+    const totalCells = levelConfig.count;
+
+    // Scaling Logic:
+    // Max active racoons scales with grid size and level.
+    // Base saturation: 30% of grid + 2% per level. Cap at 60%.
+    const saturation = Math.min(0.6, 0.3 + (state.level * 0.02));
+    const maxRacoons = Math.max(1, Math.floor(totalCells * saturation));
 
     if (state.activeTimers.size >= maxRacoons) {
         setTimeout(spawn, 500);
@@ -363,7 +401,12 @@ function spawn() {
     const timerId = setTimeout(() => miss(idx), state.speed);
     state.activeTimers.set(idx, timerId);
 
-    const nextSpawnTime = Math.max(300, state.speed / (maxRacoons * 0.9));
+    // Spawn rate also increases with level
+    // Faster spawn as level increases, but never faster than 250ms
+    const baseSpawnDelay = 1000 * Math.pow(0.95, state.level - 1);
+    const concurrentFactor = Math.max(1, state.activeTimers.size);
+    const nextSpawnTime = Math.max(250, baseSpawnDelay / concurrentFactor);
+
     setTimeout(spawn, nextSpawnTime);
 }
 
@@ -391,11 +434,22 @@ function hit(idx) {
 
     const points = 10 * state.combo;
     state.score += points;
-    state.level = Math.floor(state.score / 100) + 1;
 
-    // Speed increases per level
-    state.speed = Math.max(CONFIG.minSpeed, CONFIG.baseSpeed - (state.level * CONFIG.decrease));
-    Music.setTempo(1.0 + (state.level * 0.05));
+    // Level Up Formula: Slower progression
+    // Each level requires more points. 
+    // Level 1 -> 2 needs 250pts
+    state.level = Math.floor(state.score / 250) + 1;
+
+    // Speed Decay: Exponential
+    // Level 1: 1200ms
+    // Level 5: ~977ms
+    // Level 10: ~756ms
+    // Min Speed Cap: 400ms
+    const newSpeed = CONFIG.baseSpeed * Math.pow(0.95, state.level - 1);
+    state.speed = Math.max(400, newSpeed);
+
+    // Music Tempo
+    Music.setTempo(1.0 + ((state.level - 1) * 0.05));
 
     beep(600 + (state.combo * 50), 'square');
     updateUI();
