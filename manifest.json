@@ -1,0 +1,21 @@
+{
+    "name": "Racoon Smash",
+    "short_name": "Racoon Smash",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#0f2e1c",
+    "theme_color": "#2e7d32",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "assets/img/normal.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "assets/img/normal.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

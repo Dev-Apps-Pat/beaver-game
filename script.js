@@ -1,0 +1,537 @@
+// PWA SERVICE WORKER REGISTRATION
+// PWA SERVICE WORKER REGISTRATION
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+            .then(reg => {
+                console.log('SW registered!', reg);
+
+                // If there's a waiting worker, we can skip waiting (this is handled in sw.js now)
+                if (reg.waiting) {
+                    console.log('SW waiting, skipping...');
+                    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                }
+
+                reg.onupdatefound = () => {
+                    const installingWorker = reg.installing;
+                    installingWorker.onstatechange = () => {
+                        if (installingWorker.state === 'installed') {
+                            if (navigator.serviceWorker.controller) {
+                                // New update available
+                                console.log('New content available; please refresh.');
+                                // Ideally show a toast, for now just log.
+                                // sw.js handles skipWaiting, so it might auto-activate.
+                            } else {
+                                console.log('Content is cached for offline use.');
+                            }
+                        }
+                    };
+                };
+            })
+            .catch(err => console.log('SW failed!', err));
+
+        // Reload page when new SW takes control
+        let refreshing;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
+        });
+    });
+}
+
+// LEVELS CONFIG
+const LEVELS = [
+    { name: "🌲 Forest Stream", grid: [3, 3], bg: "url('assets/img/background.png')", count: 9 },
+    { name: "🪵 Racoon Den", grid: [4, 3], bg: "url('assets/img/background2.png')", count: 12 },
+    { name: "❄️ Winter Night", grid: [4, 4], bg: "url('assets/img/background3.png')", count: 16 }
+];
+
+let currentLevelIndex = 0;
+
+// CONFIG
+const CONFIG = { baseSpeed: 1200, minSpeed: 600, decrease: 15 };
+let state = {
+    score: 0, level: 1, lives: 3,
+    activeTimers: new Map(),
+    busyCells: new Set(),
+    isOver: false, speed: 1000, combo: 0, maxCombo: 0, isPaused: false
+};
+
+// PERSISTENCE
+let records = {
+    highScore: parseInt(localStorage.getItem('racoon_highScore') || 0),
+    maxCombo: parseInt(localStorage.getItem('racoon_maxCombo') || 0)
+};
+
+// DOM (Updated with Loading Screen)
+const els = {
+    gameContainer: document.getElementById('game-container'),
+    intro: document.getElementById('intro-screen'),
+    loadingScreen: document.getElementById('loading-screen'),
+    levelSelector: document.getElementById('level-selector'),
+    levelsContainer: document.querySelector('.levels-container'),
+    gameOver: document.getElementById('game-over'),
+    pauseScreen: document.getElementById('pause-screen'),
+    score: document.getElementById('score'),
+    level: document.getElementById('level'),
+    lives: document.getElementById('lives'),
+    finalScore: document.getElementById('final-score'),
+    finalCombo: document.getElementById('final-combo'),
+    comboCnt: document.getElementById('combo-cnt'),
+    introHighScore: document.getElementById('intro-high-score'),
+    introMaxCombo: document.getElementById('intro-max-combo')
+};
+
+// ASSET PRELOADING
+const ASSETS_TO_LOAD = [
+    'assets/img/background.png',
+    'assets/img/background2.png',
+    'assets/img/background3.png',
+    'assets/img/beaver_main.png',
+    'assets/img/hole.png',
+    'assets/img/normal.png',
+    'assets/img/yes.png',
+    'assets/img/no.png',
+    'assets/img/over.png'
+];
+
+function preloadAssets() {
+    let loaded = 0;
+    const total = ASSETS_TO_LOAD.length;
+
+    return Promise.all(ASSETS_TO_LOAD.map(src => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.src = src;
+            img.onload = () => {
+                loaded++;
+                console.log(`Loaded: ${src} (${loaded}/${total})`);
+                resolve();
+            };
+            img.onerror = () => {
+                console.warn(`Failed to load: ${src}`);
+                resolve(); // Continue even on error
+            };
+        });
+    }));
+}
+
+// INIT UI & ASSETS
+// Combine preload with a timeout race to prevent infinite loading
+Promise.race([
+    preloadAssets(),
+    new Promise(resolve => setTimeout(resolve, 3000)) // Force start after 3s
+]).then(() => {
+    // Hide Loading Screen
+    if (els.loadingScreen) {
+        els.loadingScreen.classList.add('fade-out');
+        setTimeout(() => {
+            els.loadingScreen.style.display = 'none';
+        }, 500);
+    }
+    // Show Intro Logic
+    updateIntroStats();
+    if (els.intro) els.intro.style.display = 'flex';
+});
+
+function updateIntroStats() {
+    if (els.introHighScore) els.introHighScore.innerText = records.highScore;
+    if (els.introMaxCombo) els.introMaxCombo.innerText = records.maxCombo;
+}
+
+function saveRecords() {
+    if (state.score > records.highScore) {
+        records.highScore = state.score;
+        localStorage.setItem('racoon_highScore', records.highScore);
+    }
+    if (state.maxCombo > records.maxCombo) {
+        records.maxCombo = state.maxCombo;
+        localStorage.setItem('racoon_maxCombo', records.maxCombo);
+    }
+}
+
+// AUDIO SYSTEM (Music + SFX)
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+function beep(f, t, vol = 0.1, dur = 0.1) {
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = f; o.type = t;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + dur);
+    o.start(); o.stop(ctx.currentTime + dur);
+}
+
+// MUSIC ENGINE
+const Music = {
+    isPlaying: false,
+    tempo: 1.0,
+    nextNoteTime: 0,
+    noteIndex: 0,
+    melody: [523.25, 0, 659.25, 0, 783.99, 0, 880.00, 0, 932.33, 0, 880.00, 0, 783.99, 0, 659.25, 0],
+    bass: [261.63, 261.63, 329.63, 329.63, 392.00, 392.00, 440.00, 440.00, 466.16, 466.16, 440.00, 440.00, 392.00, 392.00, 329.63, 329.63],
+    timerID: null,
+
+    start() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+        this.nextNoteTime = ctx.currentTime + 0.1;
+        this.scheduler();
+    },
+
+    stop() {
+        this.isPlaying = false;
+        clearTimeout(this.timerID);
+    },
+
+    setTempo(multiplier) {
+        this.tempo = multiplier;
+    },
+
+    scheduler() {
+        if (!this.isPlaying) return;
+        while (this.nextNoteTime < ctx.currentTime + 0.1) {
+            this.playStep(this.nextNoteTime);
+            const secondsPerStep = 0.125 / this.tempo;
+            this.nextNoteTime += secondsPerStep;
+        }
+        this.timerID = setTimeout(() => this.scheduler(), 25);
+    },
+
+    playStep(time) {
+        const step = this.noteIndex % 16;
+        if (this.melody[step] > 0) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'square';
+            osc.frequency.value = this.melody[step];
+            gain.gain.setValueAtTime(0.02, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.1);
+            osc.start(time); osc.stop(time + 0.1);
+        }
+        if (this.bass[step] > 0) {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'triangle';
+            osc.frequency.value = this.bass[step] / 2;
+            gain.gain.setValueAtTime(0.05, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+            osc.start(time); osc.stop(time + 0.2);
+        }
+        this.noteIndex++;
+    }
+};
+
+function playSadMusic() {
+    Music.stop();
+    const notes = [
+        { f: 392.00, d: 0.5 }, { f: 311.13, d: 0.5 }, { f: 261.63, d: 0.5 },
+        { f: 196.00, d: 1.0 }, { f: 155.56, d: 1.5 }
+    ];
+    let time = ctx.currentTime;
+    notes.forEach(n => {
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.type = 'sine'; o.frequency.value = n.f;
+        g.gain.setValueAtTime(0.15, time); g.gain.exponentialRampToValueAtTime(0.01, time + n.d);
+        o.start(time); o.stop(time + n.d);
+        time += n.d * 0.8;
+    });
+}
+
+// PAUSE LOGIC
+function togglePause() {
+    if (state.isOver) return;
+    state.isPaused = !state.isPaused;
+
+    if (state.isPaused) {
+        Music.stop();
+        state.activeTimers.forEach((timer, idx) => clearTimeout(timer));
+        els.pauseScreen.classList.add('show');
+    } else {
+        els.pauseScreen.classList.remove('show');
+        Music.start();
+        state.activeTimers.clear();
+        state.busyCells.clear();
+        document.querySelectorAll('.cell').forEach(c => c.innerHTML = '');
+        spawn();
+    }
+}
+
+// LEVEL SYSTEM
+function showLevelSelector() {
+    if (ctx.state === 'suspended') ctx.resume();
+    els.intro.classList.add('fade-out');
+    els.levelSelector.style.display = 'flex';
+    renderLevelSelector();
+}
+
+function backToIntro() {
+    els.levelSelector.style.display = 'none';
+    els.intro.classList.remove('fade-out');
+}
+
+function renderLevelSelector() {
+    els.levelsContainer.innerHTML = '';
+    LEVELS.forEach((lvl, idx) => {
+        const card = document.createElement('div');
+        card.className = 'level-card';
+        card.innerHTML = `<h3>Level ${idx + 1}</h3><p>${lvl.name}</p><p>${lvl.grid[0]}x${lvl.grid[1]} Grid</p>`;
+        card.onclick = () => startLevel(idx);
+        els.levelsContainer.appendChild(card);
+    });
+}
+
+function startLevel(idx) {
+    currentLevelIndex = idx;
+    els.levelSelector.style.display = 'none';
+    initGrid(LEVELS[idx]);
+    resetGame();
+}
+
+function initGrid(config) {
+    const frame = document.getElementById('app-frame');
+
+    // Set Background
+    // If exact asset doesn't exist, it will fallback or just show color. 
+    // We assume assets will be there or we use default for now if 404.
+    frame.style.backgroundImage = `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), ${config.bg}`;
+
+    // Reset Container
+    els.gameContainer.innerHTML = '';
+
+    // Set Grid Class
+    els.gameContainer.className = ''; // clear previous
+    if (config.grid[0] === 3) els.gameContainer.className = 'grid-3x3';
+    if (config.grid[0] === 4 && config.grid[1] === 3) els.gameContainer.className = 'grid-4x3';
+    if (config.grid[0] === 4 && config.grid[1] === 4) els.gameContainer.className = 'grid-4x4';
+
+    // Create Cells
+    for (let i = 0; i < config.count; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.onclick = () => hit(i);
+        els.gameContainer.appendChild(cell);
+
+        // Add combo container only once, efficiently? 
+        // Actually, existing code had combo-cnt inside game-container. 
+        // We should add it back after cells.
+    }
+
+    // Add shared combo container
+    if (!document.getElementById('combo-cnt')) {
+        const comboCnt = document.createElement('div');
+        comboCnt.id = 'combo-cnt';
+        comboCnt.className = 'combo-container';
+        els.gameContainer.appendChild(comboCnt);
+        els.comboCnt = comboCnt; // update Ref
+    }
+}
+
+// GAME LOOP
+function resetGame() {
+    Music.start();
+    Music.setTempo(1.0);
+
+    if (state.activeTimers) state.activeTimers.forEach(t => clearTimeout(t));
+
+    const levelConfig = LEVELS[currentLevelIndex];
+
+    state = {
+        score: 0, level: 1, lives: 3,
+        activeTimers: new Map(),
+        busyCells: new Set(),
+        isOver: false, speed: CONFIG.baseSpeed, combo: 0, maxCombo: 0, isPaused: false
+    };
+
+    updateUI();
+    els.gameOver.classList.remove('show');
+
+    // Clear cells via DOM
+    const cells = document.querySelectorAll('.cell');
+    cells.forEach(c => c.innerHTML = '');
+    if (els.comboCnt) els.comboCnt.innerHTML = '';
+
+    setTimeout(spawn, 500);
+}
+
+function spawn() {
+    if (state.isOver || state.isPaused) return;
+
+    const levelConfig = LEVELS[currentLevelIndex];
+    const totalCells = levelConfig.count;
+
+    // Scaling Logic:
+    // Max active racoons scales with grid size and level.
+    // Base saturation: 30% of grid + 2% per level. Cap at 60%.
+    const saturation = Math.min(0.6, 0.3 + (state.level * 0.02));
+    const maxRacoons = Math.max(1, Math.floor(totalCells * saturation));
+
+    if (state.activeTimers.size >= maxRacoons) {
+        setTimeout(spawn, 500);
+        return;
+    }
+
+    const cells = document.querySelectorAll('.cell');
+    let availableIdx = [];
+    cells.forEach((_, i) => {
+        if (!state.activeTimers.has(i) && !state.busyCells.has(i)) {
+            availableIdx.push(i);
+        }
+    });
+
+    if (availableIdx.length === 0) {
+        setTimeout(spawn, 300);
+        return;
+    }
+
+    const idx = availableIdx[Math.floor(Math.random() * availableIdx.length)];
+
+    // Create Racoon
+    const racoon = document.createElement('div');
+    racoon.className = 'hole-mask';
+    racoon.style.pointerEvents = "none";
+    racoon.innerHTML = `<div class="racoon"><div class="racoon-container"><div class="racoon-img normal"></div></div></div>`;
+    cells[idx].appendChild(racoon);
+
+    // Set Timer
+    const timerId = setTimeout(() => miss(idx), state.speed);
+    state.activeTimers.set(idx, timerId);
+
+    // Spawn rate also increases with level
+    // Faster spawn as level increases, but never faster than 250ms
+    const baseSpawnDelay = 1000 * Math.pow(0.95, state.level - 1);
+    const concurrentFactor = Math.max(1, state.activeTimers.size);
+    const nextSpawnTime = Math.max(250, baseSpawnDelay / concurrentFactor);
+
+    setTimeout(spawn, nextSpawnTime);
+}
+
+function hit(idx) {
+    if (state.isOver || state.isPaused) return;
+
+    if (!state.activeTimers.has(idx)) {
+        wrongHole();
+        return;
+    }
+
+    clearTimeout(state.activeTimers.get(idx));
+    state.activeTimers.delete(idx);
+    state.busyCells.add(idx);
+
+    const cells = document.querySelectorAll('.cell');
+    const cell = cells[idx];
+    const mask = cell.querySelector('.hole-mask');
+    const img = mask ? mask.querySelector('.racoon-img') : null;
+    if (img) img.className = 'racoon-img yes';
+
+    state.combo++;
+    if (state.combo > state.maxCombo) state.maxCombo = state.combo;
+    showComboEffect(state.combo);
+
+    const points = 10 * state.combo;
+    state.score += points;
+
+    // Level Up Formula: Slower progression
+    // Each level requires more points. 
+    // Level 1 -> 2 needs 250pts
+    state.level = Math.floor(state.score / 250) + 1;
+
+    // Speed Decay: Exponential
+    // Level 1: 1200ms
+    // Level 5: ~977ms
+    // Level 10: ~756ms
+    // Min Speed Cap: 400ms
+    const newSpeed = CONFIG.baseSpeed * Math.pow(0.95, state.level - 1);
+    state.speed = Math.max(400, newSpeed);
+
+    // Music Tempo
+    Music.setTempo(1.0 + ((state.level - 1) * 0.05));
+
+    beep(600 + (state.combo * 50), 'square');
+    updateUI();
+
+    setTimeout(() => {
+        if (cells[idx]) cells[idx].innerHTML = '';
+        state.busyCells.delete(idx);
+    }, 300);
+}
+
+function wrongHole() {
+    state.lives--;
+    state.combo = 0;
+    if (els.comboCnt) els.comboCnt.innerHTML = '';
+
+    beep(150, 'sawtooth');
+
+    const container = document.getElementById('game-container');
+    container.classList.remove('shake');
+    void container.offsetWidth;
+    container.classList.add('shake');
+
+    updateUI();
+
+    if (state.lives <= 0) {
+        endGame();
+    }
+}
+
+function miss(idx) {
+    if (state.isOver || state.isPaused) return;
+
+    if (!state.activeTimers.has(idx)) return;
+    state.activeTimers.delete(idx);
+    state.busyCells.add(idx);
+
+    state.combo = 0;
+    if (els.comboCnt) els.comboCnt.innerHTML = '';
+
+    const cells = document.querySelectorAll('.cell');
+    const cell = cells[idx];
+    const mask = cell.querySelector('.hole-mask');
+    if (mask) {
+        const racoon = mask.querySelector('.racoon');
+        if (racoon) racoon.classList.add('miss');
+        const img = mask.querySelector('.racoon-img');
+        if (img) img.className = 'racoon-img no';
+    }
+
+    state.lives--;
+    beep(200, 'sawtooth');
+    updateUI();
+
+    if (state.lives <= 0) {
+        endGame();
+    } else {
+        setTimeout(() => {
+            if (cells[idx]) cells[idx].innerHTML = '';
+            state.busyCells.delete(idx);
+        }, 300);
+    }
+}
+
+function showComboEffect(val) {
+    if (val < 2) return;
+    if (els.comboCnt) els.comboCnt.innerHTML = `<div class="combo-pop">x${val}</div>`;
+}
+
+function endGame() {
+    state.isOver = true;
+    saveRecords();
+    updateIntroStats();
+
+    els.finalScore.innerText = state.score;
+    els.finalCombo.innerText = state.maxCombo;
+
+    els.gameOver.classList.add('show');
+    playSadMusic();
+}
+
+function updateUI() {
+    els.score.innerText = state.score;
+    els.level.innerText = state.level;
+    els.lives.innerHTML = '❤'.repeat(Math.max(0, state.lives));
+}
